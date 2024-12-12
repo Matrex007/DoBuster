@@ -7,14 +7,47 @@ def print_banner():
     banner = """
            _____   __  __     _____   _____ ____ _______ _____ __   __
      /\   / _ \ \ / /  \ \   / / _ \ / ____|___ |__   __|  __ \\ \ / /
-    /  \ | | | \ V _____\ \_/ | | | | (___   __) | | |  | |__) |\ V /
-   / /\ \| | | |> |______\   /| | | |\___ \ |__ <  | |  |  _  /  > <
-  / ____ | |_| / . \      | | | |_| |____) |___) | | |  | | \ \ / . \
- /_/    \_\___/_/ \_\     |_|  \___/|_____/|____/  |_|  |_|  \_/_/ \_\\
+    /  \ | | | \ V /     \ \_/ / | | | (___   __) | | |  | |__) |\ V / 
+   / /\ \| | | |> |______\   /| | | |\___ \ |__ <  | |  |  _  /  > <  
+  / ____ | |_| / . \      | | | |_| |____) |___) | | |  | | \ \ / . \ 
+ /_/    \_\___/_/ \_\     |_|  \___/|_____/|____/  |_|  |_|  \_/_/ \_\
+                                                                     
+                                                                     
     """
     print("\033[1;32m" + banner + "\033[0m")
 
-def run_subfinder(domains, output_file):
+# Function to check and install tools if they are not installed
+def check_and_install_tools():
+    tools = ["subfinder", "assetfinder", "httpx", "curl"]
+    for tool in tools:
+        if not is_tool_installed(tool):
+            print(f"{tool} is not installed. Installing...")
+            install_tool(tool)
+
+def is_tool_installed(tool):
+    """Check if a tool is installed by trying to call it in the terminal."""
+    try:
+        subprocess.run([tool, "--version"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        return True
+    except FileNotFoundError:
+        return False
+
+def install_tool(tool):
+    """Attempt to install a tool using appropriate package managers."""
+    try:
+        if tool == "subfinder":
+            subprocess.run(["go", "install", "github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest"], check=True)
+        elif tool == "assetfinder":
+            subprocess.run(["go", "install", "github.com/tomnomnom/assetfinder@latest"], check=True)
+        elif tool == "httpx":
+            subprocess.run(["go", "install", "github.com/projectdiscovery/httpx/cmd/httpx@latest"], check=True)
+        elif tool == "curl":
+            subprocess.run(["sudo", "apt-get", "install", "curl", "-y"], check=True)
+    except subprocess.CalledProcessError:
+        print(f"Failed to install {tool}. Please install it manually.")
+        exit(1)
+
+def run_subfinder(domains):
     """Run subfinder on a domain or a list of domains."""
     subdomains = []
     if isinstance(domains, list):  # If input is a list of domains
@@ -89,50 +122,6 @@ def run_httpx(subdomains_file, output_file, filter_200=False):
         print("httpx not found. Please ensure it is installed and added to PATH.")
         return None
 
-def run_crt_sh(domain):
-    """Run crt.sh to check for certificates related to the domain."""
-    print(f"Running crt.sh for domain: {domain}...")
-    try:
-        command = ["curl", "-s", f"https://crt.sh/?q={domain}&output=json"]
-        result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-
-        if result.returncode == 0:
-            crt_data = result.stdout
-            if crt_data:
-                with open(f"{domain}_crt_results.json", "w") as file:
-                    file.write(crt_data)
-                print(f"CRT results saved to {domain}_crt_results.json")
-            else:
-                print("No certificate data found for this domain.")
-        else:
-            print(f"Error running crt.sh for domain {domain}:")
-            print(result.stderr)
-
-    except FileNotFoundError:
-        print("curl not found. Please ensure it is installed and added to PATH.")
-
-def run_dnsrecon(domain):
-    """Run dnsrecon on a domain."""
-    print(f"Running dnsrecon for domain: {domain}...")
-    try:
-        command = ["dnsrecon", "-d", domain]
-        result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-
-        if result.returncode == 0:
-            dns_data = result.stdout
-            if dns_data:
-                with open(f"{domain}_dnsrecon_results.txt", "w") as file:
-                    file.write(dns_data)
-                print(f"Dnsrecon results saved to {domain}_dnsrecon_results.txt")
-            else:
-                print("No DNS data found for this domain.")
-        else:
-            print(f"Error running dnsrecon for domain {domain}:")
-            print(result.stderr)
-
-    except FileNotFoundError:
-        print("dnsrecon not found. Please ensure it is installed and added to PATH.")
-
 def save_to_file(filename, data):
     """Save data to a file after removing duplicates."""
     unique_data = sorted(set(data))  # Removing duplicates using set
@@ -143,12 +132,13 @@ def save_to_file(filename, data):
 def main():
     print_banner()  # Print the ASCII art banner when script starts
 
+    check_and_install_tools()  # Check and install tools if not installed
+
     parser = argparse.ArgumentParser(description="Subdomain enumeration tool.")
     parser.add_argument("-d", "--domain", help="Enter a single domain (e.g. example.com)")
     parser.add_argument("-L", "--list", help="Provide a list of domains (filename)")
     parser.add_argument("-f", "--filter", action="store_true", help="Filter results to include only status code 200")
     parser.add_argument("-c", "--crt", action="store_true", help="Run crt.sh on the given domain (only works for single domains)")
-    parser.add_argument("-r", "--dnsrecon", action="store_true", help="Run dnsrecon on the given domain (only works for single domains)")
 
     args = parser.parse_args()
 
@@ -160,39 +150,27 @@ def main():
 
         subdomains = []
         for domain in domain_list:
-            subdomains.extend(run_subfinder(domain, None))  # Collect subdomains from subfinder
+            subdomains.extend(run_subfinder(domain))  # Collect subdomains from subfinder
             subdomains.extend(run_assetfinder(domain))  # Collect subdomains from assetfinder
 
-        # Remove duplicates and save the combined results
-        save_to_file("all_subdomains.txt", subdomains)
+        # Remove duplicates and save to file
+        subdomains = sorted(set(subdomains))  # Removing duplicates using set
+        save_to_file("allSub.txt", subdomains)
 
+        # Run httpx with filtering
+        run_httpx("allSub.txt", "httpx_results.txt", filter_200=args.filter)
     elif args.domain:
         domain = args.domain
-
         subdomains = []
-        subdomains.extend(run_subfinder(domain, None))
-        subdomains.extend(run_assetfinder(domain))
+        subdomains.extend(run_subfinder(domain))  # Collect subdomains from subfinder
+        subdomains.extend(run_assetfinder(domain))  # Collect subdomains from assetfinder
 
-        # Remove duplicates and save the combined results
-        save_to_file("all_subdomains.txt", subdomains)
+        # Remove duplicates and save to file
+        subdomains = sorted(set(subdomains))  # Removing duplicates using set
+        save_to_file("allSub.txt", subdomains)
 
-        # Run dnsrecon if specified
-        if args.dnsrecon:
-            run_dnsrecon(domain)
-
-        # Run crt.sh if specified
-        if args.crt:
-            run_crt_sh(domain)
-
-    # Run httpx on the combined results
-    httpx_output_file = "httpx_results.txt"
-    httpx_output = run_httpx("all_subdomains.txt", httpx_output_file, filter_200=args.filter)
-
-    # If filter_200 is True, save the filtered results as alive200.txt
-    if args.filter and httpx_output:
-        with open("alive200.txt", "w") as file:
-            file.write(httpx_output)
-        print("Filtered results with HTTP 200 saved to alive200.txt")
+        # Run httpx with filtering
+        run_httpx("allSub.txt", "httpx_results.txt", filter_200=args.filter)
 
 if __name__ == "__main__":
     main()
